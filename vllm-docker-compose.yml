@@ -1,0 +1,65 @@
+services:
+  vllm:
+    # Apple Silicon: latest-arm64 | Intel/AMD Linux: latest-x86_64
+    image: vllm/vllm-openai-cpu:${VLLM_IMAGE_TAG:-latest-x86_64}
+    container_name: vllm-qwen2.5-7b-cpu
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8000}:8000"
+    shm_size: 16g
+    cap_add:
+      - SYS_NICE
+    security_opt:
+      - seccomp=unconfined
+    volumes:
+      - ./huggingface-cache:/root/.cache/huggingface
+      - ./vllm-cache:/root/.cache/vllm
+    environment:
+      # Hugging Face (нужен для загрузки Qwen/Qwen2.5-7B-Instruct)
+      HF_TOKEN: ${HF_TOKEN:-}
+      HUGGING_FACE_HUB_TOKEN: ${HUGGING_FACE_HUB_TOKEN:-}
+
+      # Модель и сервер
+      MODEL: ${MODEL:-Qwen/Qwen2.5-7B-Instruct}
+      HOST: ${HOST:-0.0.0.0}
+      PORT: ${PORT:-8000}
+      SERVED_MODEL_NAME: ${SERVED_MODEL_NAME:-Qwen/Qwen2.5-7B-Instruct}
+
+      # CPU: KV-cache и потоки (см. https://docs.vllm.ai/en/stable/getting_started/installation/cpu/)
+      VLLM_TARGET_DEVICE: ${VLLM_TARGET_DEVICE:-cpu}
+      VLLM_CPU_KVCACHE_SPACE: ${VLLM_CPU_KVCACHE_SPACE:-16}
+      VLLM_CPU_OMP_THREADS_BIND: ${VLLM_CPU_OMP_THREADS_BIND:-auto}
+      VLLM_CPU_NUM_OF_RESERVED_CPU: ${VLLM_CPU_NUM_OF_RESERVED_CPU:-1}
+
+      # Параллелизм и память (gpu-memory-utilization на CPU задаёт долю RAM)
+      TENSOR_PARALLEL_SIZE: ${TENSOR_PARALLEL_SIZE:-1}
+      GPU_MEMORY_UTILIZATION: ${GPU_MEMORY_UTILIZATION:-0.8}
+      MAX_NUM_BATCHED_TOKENS: ${MAX_NUM_BATCHED_TOKENS:-16384}
+      MAX_NUM_SEQS: ${MAX_NUM_SEQS:-64}
+      DTYPE: ${DTYPE:-bfloat16}
+
+      # Дополнительные флаги (true/false)
+      TRUST_REMOTE_CODE: ${TRUST_REMOTE_CODE:-true}
+      ASYNC_SCHEDULING: ${ASYNC_SCHEDULING:-false}
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -euo pipefail
+        ARGS=(
+          --model "$$MODEL"
+          --host "$$HOST"
+          --port "$$PORT"
+          --served-model-name "$$SERVED_MODEL_NAME"
+          --tensor-parallel-size "$$TENSOR_PARALLEL_SIZE"
+          --gpu-memory-utilization "$$GPU_MEMORY_UTILIZATION"
+          --max-num-batched-tokens "$$MAX_NUM_BATCHED_TOKENS"
+          --max-num-seqs "$$MAX_NUM_SEQS"
+          --dtype "$$DTYPE"
+        )
+        if [ "$$TRUST_REMOTE_CODE" = "true" ]; then
+          ARGS+=(--trust-remote-code)
+        fi
+        if [ "$$ASYNC_SCHEDULING" = "true" ]; then
+          ARGS+=(--async-scheduling)
+        fi
+        exec vllm serve "$${ARGS[@]}"
