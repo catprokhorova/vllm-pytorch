@@ -1,6 +1,6 @@
 # vllm-pytorch
 
-Educational project for comparing two ways to serve the same language model locally on **CPU** using Docker Compose:
+Educational project for comparing two ways to serve the same language model on **GPU** using Docker Compose:
 
 - **[vLLM](https://github.com/vllm-project/vllm)** — optimized inference engine (`vllm-docker-compose.yml`)
 - **PyTorch + Hugging Face Transformers** — `transformers serve` on top of PyTorch (`pt-docker-compose.yml`)
@@ -13,26 +13,32 @@ Both stacks expose an **OpenAI-compatible API** on port `8000`, so you can bench
 
 Both compose files serve:
 
-**`Qwen/Qwen2.5-7B-Instruct`**
+**`openai/gpt-oss-20b`**
 
-This model fits reasonably on a **32 GB RAM** machine in `bfloat16` (~15–20 GB for weights plus server overhead).
+OpenAI's 20B-parameter MoE reasoning model with native MXFP4 quantization (~16 GB VRAM). With `bfloat16` it requires ~48 GB VRAM.
 
 ## Requirements
 
 - Docker and Docker Compose
-- ~32 GB system RAM (more is better)
-- CPU only — no GPU required
-- Hugging Face token (if model download requires authentication): copy `.env.example` to `.env` and set `HF_TOKEN`
+- **NVIDIA GPU** with [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
+- **VRAM:** 16 GB+ (MXFP4 / `dtype=auto`) or 48 GB+ (`bfloat16`)
+- Hugging Face token: copy `.env.example` to `.env` and set `HF_TOKEN`
 
 ```bash
 cp .env.example .env
 ```
 
+Verify GPU access inside Docker:
+
+```bash
+docker run --rm --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi
+```
+
 ## Project layout
 
 ```
-vllm-docker-compose.yml   # vLLM CPU deployment
-pt-docker-compose.yml     # PyTorch / Transformers deployment
+vllm-docker-compose.yml   # vLLM GPU deployment
+pt-docker-compose.yml     # PyTorch / Transformers GPU deployment
 .env.example              # Environment variable template (copy to .env)
 main.py                   # Benchmark script (5 prompts + timing)
 huggingface-cache/        # Shared model cache (created on first run)
@@ -70,7 +76,7 @@ The script sends 5 prompts to `http://localhost:8000/v1/chat/completions` and pr
 Optional flags:
 
 ```bash
-python main.py --base-url http://localhost:8000/v1 --model Qwen/Qwen2.5-7B-Instruct --max-tokens 256
+python main.py --base-url http://localhost:8000/v1 --model openai/gpt-oss-20b --max-tokens 256
 ```
 
 ## Comparing vLLM vs PyTorch
@@ -78,58 +84,57 @@ python main.py --base-url http://localhost:8000/v1 --model Qwen/Qwen2.5-7B-Instr
 | | vLLM | PyTorch (Transformers) |
 |---|---|---|
 | Compose file | `vllm-docker-compose.yml` | `pt-docker-compose.yml` |
-| Image | `vllm/vllm-openai-cpu` | `pytorch/pytorch:2.6.0-cpu` |
+| Image | `vllm/vllm-openai:gptoss` | `pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime` |
 | Server command | `vllm serve` | `transformers serve` |
-| Typical CPU speed | Faster | Slower |
+| Typical GPU speed | Faster | Slower |
 | First startup | Model loads at start | Installs deps + loads model |
 
 Run **only one** stack at a time — both bind port `8000`.
 
 ## Compose files: main differences
 
-Both files deploy the same model (`Qwen/Qwen2.5-7B-Instruct`) on CPU with an OpenAI-compatible API on port `8000`. The difference is *how* inference is run.
+Both files deploy the same model (`openai/gpt-oss-20b`) on GPU with an OpenAI-compatible API on port `8000`. The difference is *how* inference is run.
 
 ### Side-by-side
 
 | Aspect | `vllm-docker-compose.yml` | `pt-docker-compose.yml` |
 |---|---|---|
 | **Runtime** | vLLM (dedicated inference engine) | PyTorch + Hugging Face `transformers serve` |
-| **Docker image** | Pre-built `vllm/vllm-openai-cpu` | Generic `pytorch/pytorch:2.6.0-cpu` |
-| **Dependencies** | Bundled in the image | Installed at startup via `pip install transformers[serving]` |
+| **Docker image** | Pre-built `vllm/vllm-openai:gptoss` | Generic `pytorch/pytorch` CUDA runtime |
+| **GPU access** | `gpus: all`, `ipc: host` | `gpus: all`, `ipc: host` |
+| **Dependencies** | Bundled in the image | Installed at startup via `pip install` |
 | **Startup time** | Faster after image pull | Slower (pip install on every start) |
-| **Inference speed** | Optimized (PagedAttention, batching) | Baseline PyTorch; generally slower on CPU |
-| **Config complexity** | Many tuning knobs (KV cache, batching, threads) | Minimal (device, dtype, continuous batching) |
+| **Inference speed** | Optimized (PagedAttention, MXFP4 MoE kernels) | Baseline PyTorch; generally slower |
+| **Config complexity** | Many tuning knobs (batching, memory, tool calling) | Minimal (device, dtype, continuous batching) |
 | **Volumes** | `huggingface-cache` + `vllm-cache` | `huggingface-cache` only |
-| **Container extras** | `SYS_NICE`, `seccomp=unconfined` | None |
+| **gpt-oss extras** | Tool calling parser, MXFP4 kernels | `openai-harmony`, `kernels` packages |
 
 ### What they share
 
-- Same model: `Qwen/Qwen2.5-7B-Instruct`
+- Same model: `openai/gpt-oss-20b`
 - Same API: `POST /v1/chat/completions`
 - Same port: `8000`
-- Same dtype: `bfloat16`
 - Same Hugging Face cache: `./huggingface-cache` (model downloaded once, reused by both)
 - Same benchmark client: `main.py` works with either stack without changes
-- CPU-only — no GPU required
+- GPU required — NVIDIA Container Toolkit must be installed
 
 ### vLLM compose — key points
 
-- Uses a **purpose-built inference server** designed for production-scale throughput.
-- **CPU-specific settings** control memory and parallelism:
-  - `VLLM_CPU_KVCACHE_SPACE` — KV-cache size in GB
-  - `VLLM_CPU_OMP_THREADS_BIND` — CPU thread binding
-  - `MAX_NUM_BATCHED_TOKENS` / `MAX_NUM_SEQS` — batching limits
-  - `GPU_MEMORY_UTILIZATION` — on CPU, sets the fraction of RAM used for the model
-- Separate `vllm-cache` volume for engine-specific artifacts.
-- Best choice when you want **lower latency and higher throughput** on CPU.
+- Uses the **`gptoss`-tagged image** with native support for gpt-oss MXFP4 MoE and tool calling.
+- **GPU tuning** via environment variables:
+  - `GPU_MEMORY_UTILIZATION` — fraction of VRAM used (default `0.9`)
+  - `TENSOR_PARALLEL_SIZE` — multi-GPU sharding (default `1`)
+  - `MAX_MODEL_LEN` / `MAX_NUM_BATCHED_TOKENS` / `MAX_NUM_SEQS` — batching limits
+  - `TOOL_CALL_PARSER` / `ENABLE_AUTO_TOOL_CHOICE` — gpt-oss tool calling
+- On **non-Hopper GPUs** (RTX 4090, 3090), set `VLLM_ATTENTION_BACKEND=TRITON_ATTN_VLLM_V1` in `.env`.
+- Best choice for **lowest latency and highest throughput**.
 
 ### PyTorch compose — key points
 
-- Uses **vanilla PyTorch** with Hugging Face's built-in `transformers serve` CLI.
-- **Simpler setup** — fewer environment variables, easier to understand the stack.
-- Installs Python packages on each container start; no custom image build required.
-- `CONTINUOUS_BATCHING` can be enabled for modest throughput gains (off by default).
-- Best choice when you want to see **how inference works at the framework level** without an optimized serving layer.
+- Uses **vanilla PyTorch + CUDA** with Hugging Face's `transformers serve` CLI.
+- Installs `transformers[serving]`, `accelerate`, `kernels`, `triton`, and `openai-harmony` at startup.
+- `DEVICE=cuda:0` runs inference on the first GPU; `DTYPE=auto` uses the model's native MXFP4 weights.
+- Best choice to see **how inference works at the framework level** without an optimized serving layer.
 
 ### When to use which
 
@@ -138,23 +143,25 @@ Both files deploy the same model (`Qwen/Qwen2.5-7B-Instruct`) on CPU with an Ope
 | Compare inference performance | Run both with `main.py` and compare timings |
 | Learn how LLM serving is optimized | vLLM |
 | Learn PyTorch / Transformers basics | PyTorch compose |
-| Fastest responses on CPU | vLLM |
+| Fastest responses on GPU | vLLM |
 | Simplest mental model | PyTorch compose |
 
 ## Configuration
 
 Copy `.env.example` to `.env` and edit values. Docker Compose loads `.env` automatically.
 
-Edit environment variables to change:
+Key variables:
 
-- `MODEL` — Hugging Face model ID
-- `HF_TOKEN` / `HUGGING_FACE_HUB_TOKEN` — Hugging Face access token
-- `DTYPE` — e.g. `bfloat16`
-- vLLM-specific: KV cache size, batch limits, thread binding
-- PyTorch-specific: `DEVICE`, `CONTINUOUS_BATCHING`
+- `MODEL` — Hugging Face model ID (`openai/gpt-oss-20b`)
+- `HF_TOKEN` / `HUGGING_FACE_HUB_TOKEN` — Hugging Face access token (required)
+- `DTYPE` — `auto` (MXFP4, ~16 GB VRAM) or `bfloat16` (~48 GB VRAM)
+- vLLM-specific: `GPU_MEMORY_UTILIZATION`, `TENSOR_PARALLEL_SIZE`, `VLLM_ATTENTION_BACKEND`
+- PyTorch-specific: `DEVICE`, `CONTINUOUS_BATCHING`, `PYTORCH_IMAGE_TAG`
 
-On Apple Silicon, switch the vLLM image tag from `latest-x86_64` to `latest-arm64`.
+### Multi-GPU
+
+Set `TENSOR_PARALLEL_SIZE=2` (or more) in `.env` for vLLM when a single GPU does not have enough VRAM.
 
 ## License
 
-Educational use. See upstream projects (vLLM, Transformers, PyTorch) for their respective licenses.
+Educational use. See upstream projects (vLLM, Transformers, PyTorch, OpenAI gpt-oss) for their respective licenses.

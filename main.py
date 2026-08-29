@@ -9,7 +9,7 @@ import urllib.error
 import urllib.request
 
 DEFAULT_BASE_URL = "http://localhost:8000/v1"
-DEFAULT_MODEL = "Qwen/Qwen2.5-7B-Instruct"
+DEFAULT_MODEL = "openai/gpt-oss-20b"
 
 PROMPTS = [
     "Explain what a binary search tree is in two sentences.",

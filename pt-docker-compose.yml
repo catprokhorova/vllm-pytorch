@@ -1,28 +1,29 @@
 services:
   pytorch:
-    # Official PyTorch CPU image; transformers[serving] installs at startup
-    image: pytorch/pytorch:2.6.0-cpu
-    container_name: pt-qwen2.5-7b-cpu
+    # CUDA 12.4 runtime; transformers[serving] installs at startup
+    image: pytorch/pytorch:${PYTORCH_IMAGE_TAG:-2.6.0-cuda12.4-cudnn9-runtime}
+    container_name: pt-gpt-oss-20b-gpu
     restart: unless-stopped
+    gpus: all
+    ipc: host
     ports:
       - "${PORT:-8000}:8000"
     shm_size: 16g
     volumes:
       - ./huggingface-cache:/root/.cache/huggingface
     environment:
-      # Hugging Face (нужен для загрузки Qwen/Qwen2.5-7B-Instruct)
+      # Hugging Face (нужен для загрузки openai/gpt-oss-20b)
       HF_TOKEN: ${HF_TOKEN:-}
       HUGGING_FACE_HUB_TOKEN: ${HUGGING_FACE_HUB_TOKEN:-}
 
       # Модель и сервер (OpenAI-compatible API via transformers serve)
-      MODEL: ${MODEL:-Qwen/Qwen2.5-7B-Instruct}
+      MODEL: ${MODEL:-openai/gpt-oss-20b}
       HOST: ${HOST:-0.0.0.0}
       PORT: ${PORT:-8000}
 
-      # CPU / dtype (bfloat16 ≈ 15–20 GB RAM for 7B)
-      DEVICE: ${DEVICE:-cpu}
-      DTYPE: ${DTYPE:-bfloat16}
-      OMP_NUM_THREADS: ${OMP_NUM_THREADS:-auto}
+      # GPU / dtype (MXFP4 ≈ 16 GB VRAM; bfloat16 ≈ 48 GB VRAM)
+      DEVICE: ${DEVICE:-cuda:0}
+      DTYPE: ${DTYPE:-auto}
 
       # Дополнительные флаги (true/false)
       TRUST_REMOTE_CODE: ${TRUST_REMOTE_CODE:-true}
@@ -31,7 +32,7 @@ services:
     command:
       - |
         set -euo pipefail
-        pip install -q -U "transformers[serving]" accelerate kernels
+        pip install -q -U "transformers[serving]" accelerate kernels triton openai-harmony
         ARGS=(
           "$$MODEL"
           --host "$$HOST"
