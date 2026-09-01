@@ -26,8 +26,6 @@ services:
       - awq
       - --attention-backend
       - xformers
-      - --max-seq-len-to-capture
-      - ${MODEL_NUM_CTX}
       - --gpu-memory-utilization
       - ${GPU_UTILIZE}
       - --max-model-len
