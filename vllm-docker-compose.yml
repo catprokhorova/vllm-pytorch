@@ -22,6 +22,8 @@ services:
       - ${API_KEY}
       - --model
       - ${MODEL_NAME}
+      - --quantization
+      - awq
       - --max-seq-len-to-capture
       - ${MODEL_NUM_CTX}
       - --gpu-memory-utilization
@@ -34,4 +36,3 @@ services:
       - ${MODEL_NUM_CTX}
       - --kv-cache-dtype
       - ${KV_CACHE_DTYPE}
-  
