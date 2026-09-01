@@ -24,8 +24,6 @@ services:
       - ${MODEL_NAME}
       - --quantization
       - awq
-      - --attention-backend
-      - xformers
       - --gpu-memory-utilization
       - ${GPU_UTILIZE}
       - --max-model-len
