@@ -8,8 +8,9 @@ import time
 import urllib.error
 import urllib.request
 
-DEFAULT_BASE_URL = "http://localhost:8000/v1"
-DEFAULT_MODEL = "openai/gpt-oss-20b"
+DEFAULT_BASE_URL = "http://51.250.105.106:8000/v1"
+DEFAULT_MODEL = "Qwen/Qwen2.5-14B-Instruct-AWQ"
+API_KEY = "***"
 
 PROMPTS = [
     "Explain what a binary search tree is in two sentences.",
@@ -30,7 +31,10 @@ def chat_completion(base_url: str, model: str, prompt: str, max_tokens: int) -> 
     request = urllib.request.Request(
         f"{base_url.rstrip('/')}/chat/completions",
         data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json", 
+            "Authorization": f"Bearer {API_KEY}"
+            },
         method="POST",
     )
 
