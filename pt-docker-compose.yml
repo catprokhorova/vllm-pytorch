@@ -32,7 +32,7 @@ services:
     command:
       - |
         set -euo pipefail
-        pip install -q -U "transformers[serving]" accelerate kernels triton openai-harmony
+        pip install -q -U "transformers[serving]" accelerate kernels triton openai-harmony gptqmodel
         ARGS=(
           "$$MODEL"
           --host "$$HOST"
