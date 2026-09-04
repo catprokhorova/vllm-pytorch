@@ -6,6 +6,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends gcc g++ build-essential libpcre2-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir \
+# only-if-needed: keep the image's conda torch; do not pull transformers[vision]
+# (mismatched torchvision). pillow is what AutoProcessor needs here.
+RUN pip install --no-cache-dir --upgrade-strategy only-if-needed \
     "transformers[serving,sentencepiece]" \
     accelerate kernels triton openai-harmony gptqmodel pillow
