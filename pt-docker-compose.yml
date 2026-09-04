@@ -3,24 +3,30 @@ services:
     # CUDA 12.4 runtime; transformers[serving] installs at startup
     image: pytorch/pytorch:${PYTORCH_IMAGE_TAG:-2.6.0-cuda12.4-cudnn9-runtime}
     container_name: pt-qwen
-    gpus: all
     ipc: host
-    ports:
-      - "${PORT:-8000}:8000"
     shm_size: 16g
+    ports:
+      - "${PORT:-8000}:${PORT:-8000}"
     volumes:
       - ./huggingface-cache:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     environment:
-      # Hugging Face (нужен для загрузки openai/gpt-oss-20b)
+      # Hugging Face Token
       HF_TOKEN: ${HF_TOKEN:-}
       HUGGING_FACE_HUB_TOKEN: ${HUGGING_FACE_HUB_TOKEN:-}
 
       # Модель и сервер (OpenAI-compatible API via transformers serve)
-      MODEL: ${MODEL:-openai/gpt-oss-20b}
+      MODEL: ${MODEL:-Qwen/Qwen2.5-14B-Instruct-AWQ}
       HOST: ${HOST:-0.0.0.0}
       PORT: ${PORT:-8000}
 
-      # GPU / dtype (MXFP4 ≈ 16 GB VRAM; bfloat16 ≈ 48 GB VRAM)
+      # GPU / dtype (AWQ requires auto or float16/bfloat16)
       DEVICE: ${DEVICE:-cuda:0}
       DTYPE: ${DTYPE:-auto}
 
@@ -28,31 +34,19 @@ services:
       TRUST_REMOTE_CODE: ${TRUST_REMOTE_CODE:-true}
       CONTINUOUS_BATCHING: ${CONTINUOUS_BATCHING:-false}
     entrypoint: ["/bin/bash", "-c"]
-    command:
-      - |
-        set -euo pipefail
-        # runtime image has no compiler; gptqmodel -> pypcre needs gcc + libpcre2
-        export DEBIAN_FRONTEND=noninteractive
-        apt-get update
-        apt-get install -y --no-install-recommends gcc g++ build-essential libpcre2-dev
-        rm -rf /var/lib/apt/lists/*
-        # Install HF stack without upgrading the image's conda torch / torchaudio.
-        # Avoid transformers[vision] (pulls torchvision) and global -U (breaks .so ABI).
-        pip install -q --upgrade-strategy only-if-needed \
-          "transformers[serving,sentencepiece]" accelerate kernels triton openai-harmony gptqmodel pillow
-        # Text LLM serve does not need torchaudio; drop it if pip left a broken build.
-        pip uninstall -y torchaudio >/dev/null 2>&1 || true
-        ARGS=(
-          "$$MODEL"
-          --host "$$HOST"
-          --port "$$PORT"
-          --device "$$DEVICE"
-          --dtype "$$DTYPE"
-        )
-        if [ "$$TRUST_REMOTE_CODE" = "true" ]; then
-          ARGS+=(--trust-remote-code)
-        fi
-        if [ "$$CONTINUOUS_BATCHING" = "true" ]; then
-          ARGS+=(--continuous-batching)
-        fi
-        exec transformers serve "$${ARGS[@]}"
+    command: |
+      pip install --no-cache-dir "transformers[serving]" && \
+      ARGS=(
+        "$$MODEL"
+        --host "$$HOST"
+        --port "$$PORT"
+        --device "$$DEVICE"
+        --dtype "$$DTYPE"
+      )
+      if [ "$$TRUST_REMOTE_CODE" = "true" ]; then
+        ARGS+=(--trust-remote-code)
+      fi
+      if [ "$$CONTINUOUS_BATCHING" = "true" ]; then
+        ARGS+=(--continuous-batching)
+      fi
+      exec transformers serve "$${ARGS[@]}"
