@@ -2,7 +2,7 @@ services:
   pytorch:
     # CUDA 12.4 runtime; transformers[serving] installs at startup
     image: pytorch/pytorch:${PYTORCH_IMAGE_TAG:-2.6.0-cuda12.4-cudnn9-runtime}
-    container_name: pt-gpt-oss-20b-gpu
+    container_name: pt-qwen
     restart: unless-stopped
     gpus: all
     ipc: host
