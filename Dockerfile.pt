@@ -1,60 +1,11 @@
-# syntax=docker/dockerfile:1
-# PyTorch + transformers serve image for Qwen AWQ (and similar text LLMs).
-# Build deps and HF stack here so container start only loads/serves the model.
-
 ARG PYTORCH_IMAGE_TAG=2.6.0-cuda12.4-cudnn9-runtime
 FROM pytorch/pytorch:${PYTORCH_IMAGE_TAG}
 
-ENV DEBIAN_FRONTEND=noninteractive
-
-# runtime image has no compiler; gptqmodel -> pypcre needs gcc + libpcre2
+# gptqmodel -> pypcre needs a C compiler (runtime image has none)
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        gcc g++ build-essential libpcre2-dev \
+    && apt-get install -y --no-install-recommends gcc g++ build-essential libpcre2-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Pin the image torch stack so pip cannot upgrade it (ABI breaks AutoProcessor).
-# pillow is enough for transformers' vision backend check; sentencepiece for tokenizers.
-# Do not install transformers[vision] — it pulls a mismatched torchvision.
-# Text-only Qwen: drop torchvision/torchaudio so a broken vision stack cannot
-# poison AutoProcessor imports.
-RUN <<'EOF'
-set -euo pipefail
-
-python <<'PY'
-import importlib.metadata as m
-
-pins = []
-for name in ("torch", "torchvision", "torchaudio"):
-    try:
-        pins.append(f"{name}=={m.version(name)}")
-    except m.PackageNotFoundError:
-        pass
-open("/tmp/torch-pins.txt", "w").write("\n".join(pins) + "\n")
-print("pip constraints:", pins)
-PY
-
-pip install --no-cache-dir --upgrade-strategy only-if-needed -c /tmp/torch-pins.txt \
+RUN pip install --no-cache-dir \
     "transformers[serving,sentencepiece]" \
     accelerate kernels triton openai-harmony gptqmodel pillow
-
-pip uninstall -y torchvision torchaudio || true
-conda remove -y --force torchvision torchaudio || true
-EOF
-
-# Fail fast with the real underlying import error (not the lazy-wrapper message).
-RUN <<'EOF'
-set -euo pipefail
-python <<'PY'
-import traceback
-
-try:
-    import transformers
-
-    _ = transformers.AutoProcessor
-    print("AutoProcessor import OK")
-except Exception:
-    traceback.print_exc()
-    raise SystemExit("AutoProcessor import failed; see traceback above")
-PY
-EOF
