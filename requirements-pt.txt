@@ -7,7 +7,8 @@
 #
 # Version lock notes:
 # - torch 2.6.0 ↔ torchvision 0.21.0 ↔ triton 3.2.0 (must stay in sync)
-# - transformers 4.57.x uses autoawq for AWQ (not gptqmodel; that needs torch>=2.8)
+# - transformers 4.55.x: still has PytorchGELUTanh (needed by autoawq) and
+#   modern `transformers serve --force_model` CLI. 4.57+ breaks autoawq.
 
 # --- PyTorch CUDA 12.4 ---
 torch==2.6.0
@@ -15,10 +16,10 @@ torchvision==0.21.0
 triton==3.2.0
 
 # --- HF serving (OpenAI-compatible transformers serve) ---
-transformers[serving,sentencepiece]==4.57.6
+transformers[serving,sentencepiece]==4.55.4
 accelerate==1.12.0
-huggingface-hub==0.36.0
-tokenizers==0.22.1
+huggingface-hub==0.34.0
+tokenizers==0.21.4
 safetensors==0.5.3
 sentencepiece==0.2.1
 protobuf==5.29.5

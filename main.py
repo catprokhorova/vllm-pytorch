@@ -8,7 +8,7 @@ import time
 import urllib.error
 import urllib.request
 
-DEFAULT_BASE_URL = "http://51.250.105.106:8000/v1"
+DEFAULT_BASE_URL = "http://89.169.165.97:8000/v1"
 DEFAULT_MODEL = "Qwen/Qwen2.5-14B-Instruct-AWQ"
 API_KEY = "***"
 
