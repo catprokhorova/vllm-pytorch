@@ -130,7 +130,7 @@ Both deploy the same AWQ model on GPU with an OpenAI-compatible API on port `800
 ### PyTorch compose — key points
 
 - Uses **vanilla PyTorch + CUDA** with Hugging Face's `transformers serve` CLI.
-- `Dockerfile.pt` installs build tools (`gcc`, `libpcre2-dev`) plus `transformers[serving,sentencepiece]`, `accelerate`, `kernels`, `triton`, `openai-harmony`, `pillow`, and **`gptqmodel`** (needed for AWQ). Removes the base image’s mismatched `torchvision` / `torchaudio` (they break `AutoProcessor` with `torchvision::nms does not exist`).
+- `Dockerfile.pt` installs build tools (`gcc`, `libpcre2-dev`) plus HF serving deps and **`gptqmodel`**. Replaces the base image’s broken `torchvision` with a matching CUDA 12.4 wheel (`0.21.0`, for torch 2.6) — needed by both `AutoProcessor` and `gptqmodel`.
 - `DEVICE=cuda:0` runs inference on the first GPU; `DTYPE=auto` follows the model's AWQ weights.
 - Best choice to see **how inference works at the framework level** without an optimized serving layer.
 

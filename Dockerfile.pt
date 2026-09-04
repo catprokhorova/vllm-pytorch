@@ -6,7 +6,10 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends gcc g++ build-essential libpcre2-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir --upgrade-strategy only-if-needed \
+RUN pip uninstall -y torchvision \
+    && pip install --no-cache-dir --no-deps \
+        torchvision==0.21.0 \
+        --index-url https://download.pytorch.org/whl/cu124 \
+    && pip install --no-cache-dir --upgrade-strategy only-if-needed \
         "transformers[serving,sentencepiece]" \
-        accelerate kernels triton openai-harmony gptqmodel pillow \
-    && pip uninstall -y torchvision torchaudio
+        accelerate kernels triton openai-harmony gptqmodel pillow
