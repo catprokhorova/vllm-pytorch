@@ -37,7 +37,8 @@ services:
         apt-get update
         apt-get install -y --no-install-recommends gcc g++ build-essential libpcre2-dev
         rm -rf /var/lib/apt/lists/*
-        pip install -q -U "transformers[serving]" accelerate kernels triton openai-harmony gptqmodel
+        # vision/sentencepiece: AutoProcessor import used by `transformers serve`
+        pip install -q -U "transformers[serving,vision,sentencepiece]" accelerate kernels triton openai-harmony gptqmodel pillow
         ARGS=(
           "$$MODEL"
           --host "$$HOST"
