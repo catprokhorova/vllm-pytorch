@@ -39,16 +39,17 @@ services:
       - |
         set -euo pipefail
         ARGS=(
-          "$$MODEL"
+          serve
+          --force_model "$$MODEL"
           --host "$$HOST"
           --port "$$PORT"
           --device "$$DEVICE"
           --dtype "$$DTYPE"
         )
         if [ "$$TRUST_REMOTE_CODE" = "true" ]; then
-          ARGS+=(--trust-remote-code)
+          ARGS+=(--trust_remote_code)
         fi
         if [ "$$CONTINUOUS_BATCHING" = "true" ]; then
-          ARGS+=(--continuous-batching)
+          ARGS+=(--continuous_batching)
         fi
-        exec transformers serve "$${ARGS[@]}"
+        exec transformers "$${ARGS[@]}"
