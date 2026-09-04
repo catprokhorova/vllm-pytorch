@@ -3,7 +3,6 @@ services:
     # CUDA 12.4 runtime; transformers[serving] installs at startup
     image: pytorch/pytorch:${PYTORCH_IMAGE_TAG:-2.6.0-cuda12.4-cudnn9-runtime}
     container_name: pt-qwen
-    restart: unless-stopped
     gpus: all
     ipc: host
     ports:
@@ -37,8 +36,12 @@ services:
         apt-get update
         apt-get install -y --no-install-recommends gcc g++ build-essential libpcre2-dev
         rm -rf /var/lib/apt/lists/*
-        # vision/sentencepiece: AutoProcessor import used by `transformers serve`
-        pip install -q -U "transformers[serving,vision,sentencepiece]" accelerate kernels triton openai-harmony gptqmodel pillow
+        # Install HF stack without upgrading the image's conda torch / torchaudio.
+        # Avoid transformers[vision] (pulls torchvision) and global -U (breaks .so ABI).
+        pip install -q --upgrade-strategy only-if-needed \
+          "transformers[serving,sentencepiece]" accelerate kernels triton openai-harmony gptqmodel pillow
+        # Text LLM serve does not need torchaudio; drop it if pip left a broken build.
+        pip uninstall -y torchaudio >/dev/null 2>&1 || true
         ARGS=(
           "$$MODEL"
           --host "$$HOST"

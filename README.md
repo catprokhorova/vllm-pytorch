@@ -129,7 +129,7 @@ Both deploy the same AWQ model on GPU with an OpenAI-compatible API on port `800
 ### PyTorch compose — key points
 
 - Uses **vanilla PyTorch + CUDA** with Hugging Face's `transformers serve` CLI.
-- At startup installs build tools (`gcc`, `libpcre2-dev`) plus `transformers[serving,vision,sentencepiece]`, `accelerate`, `kernels`, `triton`, `openai-harmony`, `pillow`, and **`gptqmodel`** (required to load AWQ models; `pypcre` compiles from source).
+- At startup installs build tools (`gcc`, `libpcre2-dev`) plus `transformers[serving,sentencepiece]`, `accelerate`, `kernels`, `triton`, `openai-harmony`, `pillow`, and **`gptqmodel`** (required to load AWQ models; `pypcre` compiles from source). Pip is constrained so it does not upgrade the image’s conda PyTorch stack (avoids broken `torchaudio` / ABI mismatches).
 - `DEVICE=cuda:0` runs inference on the first GPU; `DTYPE=auto` follows the model's AWQ weights.
 - Best choice to see **how inference works at the framework level** without an optimized serving layer.
 
