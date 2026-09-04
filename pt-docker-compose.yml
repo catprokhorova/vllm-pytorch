@@ -27,13 +27,11 @@ services:
       HOST: ${HOST:-0.0.0.0}
       PORT: ${PORT:-8000}
 
-      # GPU / dtype (AWQ requires auto or float16/bfloat16)
       DEVICE: ${DEVICE:-cuda:0}
-      DTYPE: ${DTYPE:-auto}
+      DTYPE: ${DTYPE:-float16}
 
       # Дополнительные флаги (true/false)
       TRUST_REMOTE_CODE: ${TRUST_REMOTE_CODE:-true}
-      CONTINUOUS_BATCHING: ${CONTINUOUS_BATCHING:-false}
     entrypoint: ["/bin/bash", "-c"]
     command:
       - |
@@ -44,12 +42,9 @@ services:
           --host "$$HOST"
           --port "$$PORT"
           --device "$$DEVICE"
-          --dtype "$$DTYPE"
+          --torch_dtype "$$DTYPE"
         )
         if [ "$$TRUST_REMOTE_CODE" = "true" ]; then
           ARGS+=(--trust_remote_code)
-        fi
-        if [ "$$CONTINUOUS_BATCHING" = "true" ]; then
-          ARGS+=(--continuous_batching)
         fi
         exec transformers "$${ARGS[@]}"

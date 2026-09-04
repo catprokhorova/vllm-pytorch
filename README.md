@@ -107,7 +107,7 @@ Both deploy the same AWQ model on GPU with an OpenAI-compatible API on port `800
 | **Dependencies** | Bundled in the image | Bundled at image build (`Dockerfile.pt`) |
 | **Startup time** | Faster after image pull | Fast after first `--build` (no pip on start) |
 | **Inference speed** | Optimized (PagedAttention, AWQ kernels) | Baseline PyTorch; generally slower |
-| **Config complexity** | Memory, context length, KV cache, API key | Device, dtype, continuous batching |
+| **Config complexity** | Memory, context length, KV cache, API key | Device, dtype |
 | **Volumes** | `./model_cache` | `./huggingface-cache` |
 
 ### What they share
@@ -133,7 +133,7 @@ Both deploy the same AWQ model on GPU with an OpenAI-compatible API on port `800
 
 - Uses **vanilla PyTorch + CUDA** with Hugging Face's `transformers serve` CLI.
 - `Dockerfile.pt` starts from `nvidia/cuda` and installs pinned deps from `requirements-pt.txt` (`torch`/`torchvision`/`triton` from the CUDA 12.4 pip index, plus `transformers[serving]==4.55.4` and **`autoawq`** for AWQ).
-- `DEVICE=cuda:0` runs inference on the first GPU; `DTYPE=auto` follows the model's AWQ weights.
+- `DEVICE=cuda:0` runs inference on the first GPU; `DTYPE=float16` (passed as `--torch_dtype`) is recommended for AWQ on CUDA.
 - Best choice to see **how inference works at the framework level** without an optimized serving layer.
 
 ### When to use which
@@ -154,9 +154,9 @@ Key variables:
 
 - `MODEL` / `MODEL_NAME` — Hugging Face model ID (`Qwen/Qwen2.5-14B-Instruct-AWQ`)
 - `HF_TOKEN` / `HUGGING_FACE_HUB_TOKEN` — Hugging Face access token (recommended)
-- `DTYPE` — `auto` for AWQ (PyTorch); vLLM uses `half` in the compose file
+- `DTYPE` — `float16` for AWQ on PyTorch (`--torch_dtype`); vLLM uses `half` in the compose file
 - vLLM-specific: `API_KEY`, `GPU_UTILIZE`, `MODEL_NUM_CTX`, `KV_CACHE_DTYPE`
-- PyTorch-specific: `DEVICE`, `CONTINUOUS_BATCHING`, `CUDA_IMAGE`, `TRUST_REMOTE_CODE`
+- PyTorch-specific: `DEVICE`, `TRUST_REMOTE_CODE`
 
 ## License
 
