@@ -1,7 +1,8 @@
 FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_ROOT_USER_ACTION=ignore
 
 # python + compiler (gptqmodel -> pypcre builds from source)
 RUN apt-get update \
@@ -12,11 +13,14 @@ RUN apt-get update \
     && ln -sf /usr/bin/python3 /usr/bin/python \
     && ln -sf /usr/bin/pip3 /usr/bin/pip
 
-# Install torch + torchvision together from the same CUDA 12.4 wheel index
-# (avoids the broken conda torchvision in pytorch/pytorch runtime images).
+# Ubuntu's apt pip is too old for gptqmodel (missing packaging / bad metadata).
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel packaging
+
+# torch + torchvision from the same CUDA 12.4 wheel index
 RUN pip install --no-cache-dir \
         torch==2.6.0 torchvision==0.21.0 \
-        --index-url https://download.pytorch.org/whl/cu124 \
-    && pip install --no-cache-dir \
+        --index-url https://download.pytorch.org/whl/cu124
+
+RUN pip install --no-cache-dir \
         "transformers[serving,sentencepiece]" \
         accelerate kernels triton openai-harmony gptqmodel pillow
