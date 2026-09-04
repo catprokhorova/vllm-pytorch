@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Send test prompts to a local OpenAI-compatible server and measure latency."""
+"""Benchmark client for OpenAI-compatible SSE (streaming) chat completions.
+
+Use this against `transformers serve` (pt-docker-compose.yml), which always
+returns text/event-stream regardless of the `stream` request field.
+"""
 
 import argparse
 import json
@@ -22,20 +26,60 @@ PROMPTS = [
 ]
 
 
+def parse_sse_chat_completion(raw: str) -> str:
+    """Assemble assistant text from OpenAI-style SSE chat.completion.chunk events."""
+    parts: list[str] = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line or not line.startswith("data:"):
+            continue
+
+        payload = line[len("data:") :].strip()
+        if not payload or payload == "[DONE]":
+            continue
+
+        try:
+            chunk = json.loads(payload)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"Invalid SSE JSON chunk: {payload[:500]}") from exc
+
+        if "error" in chunk:
+            raise RuntimeError(f"SSE error from server: {chunk['error']}")
+
+        choices = chunk.get("choices") or []
+        if not choices:
+            continue
+
+        delta = choices[0].get("delta") or {}
+        content = delta.get("content")
+        if content:
+            parts.append(content)
+
+    text = "".join(parts).strip()
+    if not text:
+        raise RuntimeError(
+            "No content deltas found in SSE stream.\n"
+            f"Raw body (truncated): {raw[:2000]}"
+        )
+    return text
+
+
 def chat_completion(base_url: str, model: str, prompt: str, max_tokens: int) -> tuple[str, float]:
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": max_tokens,
         "temperature": 0.7,
+        "stream": True,
     }
     request = urllib.request.Request(
         f"{base_url.rstrip('/')}/chat/completions",
         data=json.dumps(payload).encode(),
         headers={
-            "Content-Type": "application/json", 
-            "Authorization": f"Bearer {API_KEY}"
-            },
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {API_KEY}",
+            "Accept": "text/event-stream",
+        },
         method="POST",
     )
 
@@ -49,33 +93,19 @@ def chat_completion(base_url: str, model: str, prompt: str, max_tokens: int) -> 
             f"HTTP {exc.code} {exc.reason} from {request.full_url}\n"
             f"Response body: {error_body or '<empty>'}"
         ) from exc
-
     elapsed = time.perf_counter() - started
 
     if not raw.strip():
         raise RuntimeError(f"Empty response from {request.full_url}")
 
-    try:
-        body = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(
-            f"Non-JSON response from {request.full_url}\n"
-            f"Raw body: {raw[:2000]}"
-        ) from exc
-
-    try:
-        content = body["choices"][0]["message"]["content"].strip()
-    except (KeyError, IndexError, TypeError) as exc:
-        raise RuntimeError(
-            f"Unexpected response shape from {request.full_url}\n"
-            f"Parsed body: {json.dumps(body, ensure_ascii=False)[:2000]}"
-        ) from exc
-
+    content = parse_sse_chat_completion(raw)
     return content, elapsed
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Benchmark local model inference.")
+    parser = argparse.ArgumentParser(
+        description="Benchmark local model inference over SSE streaming responses."
+    )
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL, help="OpenAI-compatible API base URL")
     parser.add_argument("--model", default=DEFAULT_MODEL, help="Model name served by the API")
     parser.add_argument("--max-tokens", type=int, default=256, help="Max tokens per response")
@@ -83,6 +113,7 @@ def main() -> int:
 
     print(f"Model:   {args.model}")
     print(f"API:     {args.base_url}")
+    print(f"Mode:    SSE stream")
     print(f"Prompts: {len(PROMPTS)}\n")
 
     total_time = 0.0
