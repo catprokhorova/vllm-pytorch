@@ -4,7 +4,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_ROOT_USER_ACTION=ignore
 
-# python + compiler (gptqmodel -> pypcre builds from source)
+# python + compiler (autoawq / native wheels may need a toolchain)
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         python3 python3-pip python3-dev \
@@ -13,14 +13,14 @@ RUN apt-get update \
     && ln -sf /usr/bin/python3 /usr/bin/python \
     && ln -sf /usr/bin/pip3 /usr/bin/pip
 
-# Ubuntu's apt pip is too old for gptqmodel (missing packaging / bad metadata).
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel packaging
 
-# torch + torchvision from the same CUDA 12.4 wheel index
-RUN pip install --no-cache-dir \
-        torch==2.6.0 torchvision==0.21.0 \
-        --index-url https://download.pytorch.org/whl/cu124
+COPY requirements-pt.txt /tmp/requirements-pt.txt
 
-RUN pip install --no-cache-dir \
-        "transformers[serving,sentencepiece]" \
-        accelerate kernels triton openai-harmony gptqmodel pillow
+# Primary index = PyTorch cu124 so torch/torchvision stay on matching CUDA wheels.
+# PyPI is only the fallback for the rest of the pinned deps.
+RUN pip install --no-cache-dir -r /tmp/requirements-pt.txt \
+        --index-url https://download.pytorch.org/whl/cu124 \
+        --extra-index-url https://pypi.org/simple \
+    && python -c "import torch, torchvision; from torchvision.ops import nms; \
+print(f'torch={torch.__version__} torchvision={torchvision.__version__} nms=ok')"

@@ -39,8 +39,10 @@ docker run --rm --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi
 ```
 vllm-docker-compose.yml   # vLLM GPU deployment (AWQ)
 pt-docker-compose.yml     # PyTorch / Transformers GPU deployment
-Dockerfile.pt             # nvidia/cuda + torch/transformers/gptqmodel
+Dockerfile.pt             # nvidia/cuda + pinned requirements-pt.txt
+requirements-pt.txt       # Pinned torch / transformers / autoawq deps
 .env.example              # Environment variable template (copy to .env)
+
 main.py                   # Benchmark script (5 prompts + timing)
 model_cache/              # vLLM Hugging Face cache (created on first run)
 huggingface-cache/        # PyTorch Hugging Face cache (created on first run)
@@ -87,7 +89,7 @@ python main.py --base-url http://localhost:8000/v1 --model Qwen/Qwen2.5-14B-Inst
 | Compose file | `vllm-docker-compose.yml` | `pt-docker-compose.yml` |
 | Image | `vllm/vllm-openai:v0.28.0` | Built from `Dockerfile.pt` (base `nvidia/cuda`) |
 | Server command | `vllm serve` (via image entrypoint) | `transformers serve` |
-| Quantization | AWQ (`--quantization awq`) | AWQ via model weights + `gptqmodel` |
+| Quantization | AWQ (`--quantization awq`) | AWQ via model weights + `autoawq` |
 | Typical GPU speed | Faster | Slower |
 | First startup | Model loads at start | Image build once, then model load |
 
@@ -130,7 +132,7 @@ Both deploy the same AWQ model on GPU with an OpenAI-compatible API on port `800
 ### PyTorch compose — key points
 
 - Uses **vanilla PyTorch + CUDA** with Hugging Face's `transformers serve` CLI.
-- `Dockerfile.pt` starts from `nvidia/cuda` (not `pytorch/pytorch`) and installs matching `torch` + `torchvision` from the CUDA 12.4 pip index, then HF serving deps and **`gptqmodel`**. Avoids the broken conda `torchvision` ABI issue in the official PyTorch runtime images.
+- `Dockerfile.pt` starts from `nvidia/cuda` and installs pinned deps from `requirements-pt.txt` (`torch`/`torchvision`/`triton` from the CUDA 12.4 pip index, plus `transformers[serving]` and **`autoawq`** for AWQ).
 - `DEVICE=cuda:0` runs inference on the first GPU; `DTYPE=auto` follows the model's AWQ weights.
 - Best choice to see **how inference works at the framework level** without an optimized serving layer.
 
