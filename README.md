@@ -39,7 +39,7 @@ docker run --rm --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi
 ```
 vllm-docker-compose.yml   # vLLM GPU deployment (AWQ)
 pt-docker-compose.yml     # PyTorch / Transformers GPU deployment
-Dockerfile.pt             # PyTorch image: apt + HF / gptqmodel deps
+Dockerfile.pt             # nvidia/cuda + torch/transformers/gptqmodel
 .env.example              # Environment variable template (copy to .env)
 main.py                   # Benchmark script (5 prompts + timing)
 model_cache/              # vLLM Hugging Face cache (created on first run)
@@ -85,7 +85,7 @@ python main.py --base-url http://localhost:8000/v1 --model Qwen/Qwen2.5-14B-Inst
 | | vLLM | PyTorch (Transformers) |
 |---|---|---|
 | Compose file | `vllm-docker-compose.yml` | `pt-docker-compose.yml` |
-| Image | `vllm/vllm-openai:v0.28.0` | Built from `Dockerfile.pt` (base `pytorch/pytorch`) |
+| Image | `vllm/vllm-openai:v0.28.0` | Built from `Dockerfile.pt` (base `nvidia/cuda`) |
 | Server command | `vllm serve` (via image entrypoint) | `transformers serve` |
 | Quantization | AWQ (`--quantization awq`) | AWQ via model weights + `gptqmodel` |
 | Typical GPU speed | Faster | Slower |
@@ -130,7 +130,7 @@ Both deploy the same AWQ model on GPU with an OpenAI-compatible API on port `800
 ### PyTorch compose — key points
 
 - Uses **vanilla PyTorch + CUDA** with Hugging Face's `transformers serve` CLI.
-- `Dockerfile.pt` installs build tools (`gcc`, `libpcre2-dev`) plus HF serving deps and **`gptqmodel`**. Replaces the base image’s broken `torchvision` with a matching CUDA 12.4 wheel (`0.21.0`, for torch 2.6) — needed by both `AutoProcessor` and `gptqmodel`.
+- `Dockerfile.pt` starts from `nvidia/cuda` (not `pytorch/pytorch`) and installs matching `torch` + `torchvision` from the CUDA 12.4 pip index, then HF serving deps and **`gptqmodel`**. Avoids the broken conda `torchvision` ABI issue in the official PyTorch runtime images.
 - `DEVICE=cuda:0` runs inference on the first GPU; `DTYPE=auto` follows the model's AWQ weights.
 - Best choice to see **how inference works at the framework level** without an optimized serving layer.
 
@@ -154,7 +154,7 @@ Key variables:
 - `HF_TOKEN` / `HUGGING_FACE_HUB_TOKEN` — Hugging Face access token (recommended)
 - `DTYPE` — `auto` for AWQ (PyTorch); vLLM uses `half` in the compose file
 - vLLM-specific: `API_KEY`, `GPU_UTILIZE`, `MODEL_NUM_CTX`, `KV_CACHE_DTYPE`
-- PyTorch-specific: `DEVICE`, `CONTINUOUS_BATCHING`, `PYTORCH_IMAGE_TAG`, `TRUST_REMOTE_CODE`
+- PyTorch-specific: `DEVICE`, `CONTINUOUS_BATCHING`, `CUDA_IMAGE`, `TRUST_REMOTE_CODE`
 
 ## License
 

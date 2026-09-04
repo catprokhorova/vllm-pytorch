@@ -1,15 +1,22 @@
-ARG PYTORCH_IMAGE_TAG=2.6.0-cuda12.4-cudnn9-runtime
-FROM pytorch/pytorch:${PYTORCH_IMAGE_TAG}
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
 
-# gptqmodel -> pypcre needs a C compiler (runtime image has none)
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# python + compiler (gptqmodel -> pypcre builds from source)
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends gcc g++ build-essential libpcre2-dev \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get install -y --no-install-recommends \
+        python3 python3-pip python3-dev \
+        gcc g++ build-essential libpcre2-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/python3 /usr/bin/python \
+    && ln -sf /usr/bin/pip3 /usr/bin/pip
 
-RUN pip uninstall -y torchvision \
-    && pip install --no-cache-dir --no-deps \
-        torchvision==0.21.0 \
+# Install torch + torchvision together from the same CUDA 12.4 wheel index
+# (avoids the broken conda torchvision in pytorch/pytorch runtime images).
+RUN pip install --no-cache-dir \
+        torch==2.6.0 torchvision==0.21.0 \
         --index-url https://download.pytorch.org/whl/cu124 \
-    && pip install --no-cache-dir --upgrade-strategy only-if-needed \
+    && pip install --no-cache-dir \
         "transformers[serving,sentencepiece]" \
         accelerate kernels triton openai-harmony gptqmodel pillow

@@ -3,13 +3,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.pt
-      args:
-        PYTORCH_IMAGE_TAG: ${PYTORCH_IMAGE_TAG:-2.6.0-cuda12.4-cudnn9-runtime}
     container_name: pt-qwen
     ipc: host
     shm_size: 16g
     ports:
-      - "${PORT:-8000}:${PORT:-8000}"
+      - "8000:8000"
     volumes:
       - ./huggingface-cache:/root/.cache/huggingface
     deploy:
