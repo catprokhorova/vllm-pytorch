@@ -37,19 +37,20 @@ services:
       TRUST_REMOTE_CODE: ${TRUST_REMOTE_CODE:-true}
       CONTINUOUS_BATCHING: ${CONTINUOUS_BATCHING:-false}
     entrypoint: ["/bin/bash", "-c"]
-    command: |
-      set -euo pipefail
-      ARGS=(
-        "$$MODEL"
-        --host "$$HOST"
-        --port "$$PORT"
-        --device "$$DEVICE"
-        --dtype "$$DTYPE"
-      )
-      if [ "$$TRUST_REMOTE_CODE" = "true" ]; then
-        ARGS+=(--trust-remote-code)
-      fi
-      if [ "$$CONTINUOUS_BATCHING" = "true" ]; then
-        ARGS+=(--continuous-batching)
-      fi
-      exec transformers serve "$${ARGS[@]}"
+    command:
+      - |
+        set -euo pipefail
+        ARGS=(
+          "$$MODEL"
+          --host "$$HOST"
+          --port "$$PORT"
+          --device "$$DEVICE"
+          --dtype "$$DTYPE"
+        )
+        if [ "$$TRUST_REMOTE_CODE" = "true" ]; then
+          ARGS+=(--trust-remote-code)
+        fi
+        if [ "$$CONTINUOUS_BATCHING" = "true" ]; then
+          ARGS+=(--continuous-batching)
+        fi
+        exec transformers serve "$${ARGS[@]}"
