@@ -39,6 +39,7 @@ docker run --rm --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi
 ```
 vllm-docker-compose.yml   # vLLM GPU deployment (AWQ)
 pt-docker-compose.yml     # PyTorch / Transformers GPU deployment
+Dockerfile.pt             # PyTorch image: apt + HF / gptqmodel deps
 .env.example              # Environment variable template (copy to .env)
 main.py                   # Benchmark script (5 prompts + timing)
 model_cache/              # vLLM Hugging Face cache (created on first run)
@@ -58,10 +59,10 @@ docker compose -f vllm-docker-compose.yml up
 **PyTorch:**
 
 ```bash
-docker compose -f pt-docker-compose.yml up
+docker compose -f pt-docker-compose.yml up --build
 ```
 
-Wait until the server is ready (model download and load can take several minutes on first run). Run **only one** stack at a time — both bind port `8000`.
+First run builds `Dockerfile.pt` (deps). After that, wait for model download/load. Run **only one** stack at a time — both bind port `8000`.
 
 ### 2. Run the benchmark
 
@@ -84,11 +85,11 @@ python main.py --base-url http://localhost:8000/v1 --model Qwen/Qwen2.5-14B-Inst
 | | vLLM | PyTorch (Transformers) |
 |---|---|---|
 | Compose file | `vllm-docker-compose.yml` | `pt-docker-compose.yml` |
-| Image | `vllm/vllm-openai:v0.28.0` | `pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime` |
+| Image | `vllm/vllm-openai:v0.28.0` | Built from `Dockerfile.pt` (base `pytorch/pytorch`) |
 | Server command | `vllm serve` (via image entrypoint) | `transformers serve` |
 | Quantization | AWQ (`--quantization awq`) | AWQ via model weights + `gptqmodel` |
 | Typical GPU speed | Faster | Slower |
-| First startup | Model loads at start | Installs deps + loads model |
+| First startup | Model loads at start | Image build once, then model load |
 
 ## Compose files: main differences
 
@@ -99,10 +100,10 @@ Both deploy the same AWQ model on GPU with an OpenAI-compatible API on port `800
 | Aspect | `vllm-docker-compose.yml` | `pt-docker-compose.yml` |
 |---|---|---|
 | **Runtime** | vLLM (dedicated inference engine) | PyTorch + Hugging Face `transformers serve` |
-| **Docker image** | Pre-built `vllm/vllm-openai` | Generic `pytorch/pytorch` CUDA runtime |
-| **GPU access** | NVIDIA runtime + device reservation | `gpus: all`, `ipc: host` |
-| **Dependencies** | Bundled in the image | Installed at startup via `pip install` |
-| **Startup time** | Faster after image pull | Slower (pip install on every start) |
+| **Docker image** | Pre-built `vllm/vllm-openai` | Custom build from `Dockerfile.pt` |
+| **GPU access** | NVIDIA runtime + device reservation | NVIDIA device reservation, `ipc: host` |
+| **Dependencies** | Bundled in the image | Bundled at image build (`Dockerfile.pt`) |
+| **Startup time** | Faster after image pull | Fast after first `--build` (no pip on start) |
 | **Inference speed** | Optimized (PagedAttention, AWQ kernels) | Baseline PyTorch; generally slower |
 | **Config complexity** | Memory, context length, KV cache, API key | Device, dtype, continuous batching |
 | **Volumes** | `./model_cache` | `./huggingface-cache` |
@@ -129,7 +130,7 @@ Both deploy the same AWQ model on GPU with an OpenAI-compatible API on port `800
 ### PyTorch compose — key points
 
 - Uses **vanilla PyTorch + CUDA** with Hugging Face's `transformers serve` CLI.
-- At startup installs build tools (`gcc`, `libpcre2-dev`) plus `transformers[serving,sentencepiece]`, `accelerate`, `kernels`, `triton`, `openai-harmony`, `pillow`, and **`gptqmodel`**. The image’s `torch` version is pinned as a pip constraint; unused `torchvision` / `torchaudio` are removed so a broken vision stack cannot poison `AutoProcessor` imports.
+- `Dockerfile.pt` installs build tools (`gcc`, `libpcre2-dev`) plus `transformers[serving,sentencepiece]`, `accelerate`, `kernels`, `triton`, `openai-harmony`, `pillow`, and **`gptqmodel`**. The base image’s `torch` version is pinned as a pip constraint; unused `torchvision` / `torchaudio` are removed so a broken vision stack cannot poison `AutoProcessor` imports.
 - `DEVICE=cuda:0` runs inference on the first GPU; `DTYPE=auto` follows the model's AWQ weights.
 - Best choice to see **how inference works at the framework level** without an optimized serving layer.
 

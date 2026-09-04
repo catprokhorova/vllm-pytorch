@@ -1,7 +1,10 @@
 services:
   pytorch:
-    # CUDA 12.4 runtime; transformers[serving] installs at startup
-    image: pytorch/pytorch:${PYTORCH_IMAGE_TAG:-2.6.0-cuda12.4-cudnn9-runtime}
+    build:
+      context: .
+      dockerfile: Dockerfile.pt
+      args:
+        PYTORCH_IMAGE_TAG: ${PYTORCH_IMAGE_TAG:-2.6.0-cuda12.4-cudnn9-runtime}
     container_name: pt-qwen
     ipc: host
     shm_size: 16g
@@ -35,7 +38,7 @@ services:
       CONTINUOUS_BATCHING: ${CONTINUOUS_BATCHING:-false}
     entrypoint: ["/bin/bash", "-c"]
     command: |
-      pip install --no-cache-dir "transformers[serving]" && \
+      set -euo pipefail
       ARGS=(
         "$$MODEL"
         --host "$$HOST"
