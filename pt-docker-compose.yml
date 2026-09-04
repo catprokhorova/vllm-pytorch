@@ -32,6 +32,11 @@ services:
     command:
       - |
         set -euo pipefail
+        # runtime image has no compiler; gptqmodel -> pypcre needs gcc + libpcre2
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update
+        apt-get install -y --no-install-recommends gcc g++ build-essential libpcre2-dev
+        rm -rf /var/lib/apt/lists/*
         pip install -q -U "transformers[serving]" accelerate kernels triton openai-harmony gptqmodel
         ARGS=(
           "$$MODEL"
