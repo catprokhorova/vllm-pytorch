@@ -1,0 +1,83 @@
+# Production stack: vLLM + LiteLLM gateway + Postgres + Ollama reserve.
+#
+# Only ONE public port: 4000 (LiteLLM gateway). vLLM :8000 and Ollama :11434
+# stay inside the compose network.
+#
+# Target hardware: single GPU with ~4GB VRAM (model is AWQ-quantized 1.5B).
+
+services:
+  vllm:
+    image: vllm/vllm-openai:${VLLM_TAG}
+    command: >
+      --model ${MODEL_ID}
+      --revision ${MODEL_REVISION}
+      --served-model-name chat-main
+      --api-key ${VLLM_API_KEY}
+      --max-model-len 4096
+      --gpu-memory-utilization 0.90
+      --max-num-seqs 32
+    ipc: host
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 600s
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:${OLLAMA_TAG}
+    environment:
+      OLLAMA_HOST: 0.0.0.0
+    volumes:
+      - ollama-data:/root/.ollama
+    # No GPU reservation: reserve runs on CPU, it only has to answer.
+    # Pull the model once after first start:
+    #   docker compose exec ollama ollama pull ${RESERVE_MODEL}
+    restart: unless-stopped
+
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: ${PG_PASSWORD}
+      POSTGRES_DB: litellm
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm"]
+      interval: 10s
+      retries: 5
+    restart: unless-stopped
+
+  litellm:
+    image: ghcr.io/berriai/litellm:${LITELLM_TAG}
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./litellm.yaml:/app/config.yaml:ro
+    environment:
+      VLLM_API_KEY: ${VLLM_API_KEY}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      DATABASE_URL: postgresql://litellm:${PG_PASSWORD}@db:5432/litellm
+    depends_on:
+      vllm:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  hf-cache:
+  ollama-data:
+  pg-data:

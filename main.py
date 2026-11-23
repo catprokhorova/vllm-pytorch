@@ -3,15 +3,16 @@
 
 import argparse
 import json
+import os
 import sys
 import time
 import traceback
 import urllib.error
 import urllib.request
 
-DEFAULT_BASE_URL = "http://89.169.165.97:8000/v1"
-DEFAULT_MODEL = "Qwen/Qwen2.5-14B-Instruct-AWQ"
-API_KEY = "***"
+DEFAULT_BASE_URL = "http://localhost:4000/v1"
+DEFAULT_MODEL = "chat-main"
+API_KEY = os.environ.get("API_KEY", "")
 
 PROMPTS = [
     "Explain what a binary search tree is in two sentences.",

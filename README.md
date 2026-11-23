@@ -1,163 +1,135 @@
 # vllm-pytorch
 
-Educational project for comparing two ways to serve the same language model on **GPU** using Docker Compose:
-
-- **[vLLM](https://github.com/vllm-project/vllm)** — optimized inference engine (`vllm-docker-compose.yml`)
-- **PyTorch + Hugging Face Transformers** — `transformers serve` on top of PyTorch (`pt-docker-compose.yml`)
-
-Both stacks expose an **OpenAI-compatible API** on port `8000`, so you can benchmark them with the same client (`main.py`).
-
-> **Note:** This repository was created for **educational purposes** to explore and compare inference runtimes. It is not intended for production use.
-
-## Model
-
-Both stacks are configured for:
-
-**`Qwen/Qwen2.5-14B-Instruct-AWQ`**
-
-Qwen2.5 14B Instruct, AWQ 4-bit quantized. Fits on a single **16 GB GPU** (e.g. NVIDIA T4) with `dtype=auto` / half precision.
-
-## Requirements
-
-- Docker and Docker Compose
-- **NVIDIA GPU** with [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
-- **VRAM:** ~16 GB+ for the default AWQ model
-- Hugging Face token (recommended for higher rate limits): copy `.env.example` to `.env` and set `HF_TOKEN` / `HUGGING_FACE_HUB_TOKEN`
-
-```bash
-cp .env.example .env
-```
-
-Verify GPU access inside Docker:
-
-```bash
-docker run --rm --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi
-```
-
-## Project layout
+Industrial LLM serving stack for lecture "21. Промышленное обслуживание, развёртывание и API":
 
 ```
-vllm-docker-compose.yml   # vLLM GPU deployment (AWQ)
-pt-docker-compose.yml     # PyTorch / Transformers GPU deployment
-Dockerfile.pt             # nvidia/cuda + pinned requirements-pt.txt
-requirements-pt.txt       # Pinned torch / transformers / autoawq deps
-.env.example              # Environment variable template (copy to .env)
+client ──► LiteLLM gateway :4000 ──► vLLM :8000 (GPU, chat-main)
+                │                        ▲
+                └──► Ollama :11434 ──────┘ fallback (CPU, chat-reserve)
+                │
+                └──► Postgres (virtual keys, quotas, spend)
+```
 
-main.py                   # Benchmark script (5 prompts + timing)
-model_cache/              # vLLM Hugging Face cache (created on first run)
-huggingface-cache/        # PyTorch Hugging Face cache (created on first run)
+Only **one public port: 4000** — the gateway. vLLM has no `ports:` section;
+clients talk to aliases (`chat-main`, `chat-reserve`), never to model weights.
+
+## Hardware
+
+- Single GPU, **~4 GB VRAM**, Linux + NVIDIA Container Toolkit
+- Model: `Qwen/Qwen2.5-1.5B-Instruct-AWQ` (AWQ 4-bit, ~1.1 GB weights)
+- Reserve model runs on **CPU** — two GPU engines do not fit in 4 GB
+
+## Layout
+
+```
+.env.example          # versions + secrets template (copy to .env, never commit)
+.env                  # your copy (gitignored)
+.env.previous         # last known-good config for rollback (gitignored)
+compose.yaml          # vllm, litellm, db, ollama — all versions pinned
+litellm.yaml          # gateway config: models, fallbacks, master key
+keys.sh               # issue/list/revoke virtual keys, smoke-test 401/429
+main.py               # benchmark client (non-streaming)
 ```
 
 ## Quick start
 
-### 1. Start a server
-
-**vLLM:**
-
 ```bash
-docker compose -f vllm-docker-compose.yml up
+cp .env.example .env        # fill in secrets, keep pinned tags
+
+docker compose up -d        # vllm downloads ~1.1GB weights on first run
+
+docker compose exec ollama ollama pull qwen2.5:0.5b   # reserve model, once
+
+# wait until vllm is healthy (model load takes a few minutes)
+docker compose ps
 ```
 
-**PyTorch:**
+Issue a virtual key and test the gateway:
 
 ```bash
-docker compose -f pt-docker-compose.yml up --build
+./keys.sh new demo-user 30 20000     # prints a virtual key
+export API_KEY=sk-...                # the virtual key
+./keys.sh test "$API_KEY"            # 200 with key, 401 without
+python main.py                       # 5 prompts through the gateway
 ```
 
-First run builds `Dockerfile.pt` (deps). After that, wait for model download/load. Run **only one** stack at a time — both bind port `8000`.
+## Architecture notes
 
-### 2. Run the benchmark
+- **Aliases, not models.** Clients request `chat-main`; the real model can be
+  swapped by editing `litellm.yaml` + `.env` without touching clients.
+- **Keys and quotas.** Every consumer gets its own virtual key via `keys.sh`
+  (`rpm_limit`, `tpm_limit`, optional `budget`). One noisy client gets 429,
+  others are unaffected. Logs attribute spend per key via Postgres.
+- **Fallback.** `router_settings.fallbacks` sends `chat-main` traffic to
+  `chat-reserve` (Ollama on CPU) after `num_retries`. A dead vLLM means slower
+  answers, not errors. Streaming responses interrupted mid-flight are NOT
+  resumed — clients must retry.
+- **Only the gateway is public.** vLLM requires `VLLM_API_KEY` anyway, but its
+  port is unreachable from outside the compose network.
 
-In another terminal:
+## Updates and rollback
+
+Everything is pinned: `VLLM_TAG`, `LITELLM_TAG`, `OLLAMA_TAG`, `MODEL_REVISION`.
+No `latest` anywhere.
+
+Before any change:
 
 ```bash
-python main.py
+cp .env .env.previous           # remember last working config
+docker compose pull             # fetch new images first if tags changed
 ```
 
-The script sends 5 prompts to the OpenAI-compatible `/v1/chat/completions` endpoint and prints per-prompt latency plus total/average time.
-
-Optional flags:
+Rollback:
 
 ```bash
-python main.py --base-url http://localhost:8000/v1 --model Qwen/Qwen2.5-14B-Instruct-AWQ --max-tokens 256
+cp .env.previous .env
+docker compose up -d vllm       # recreate only what changed
 ```
 
-## Comparing vLLM vs PyTorch
+Notes:
 
-| | vLLM | PyTorch (Transformers) |
-|---|---|---|
-| Compose file | `vllm-docker-compose.yml` | `pt-docker-compose.yml` |
-| Image | `vllm/vllm-openai:v0.28.0` | Built from `Dockerfile.pt` (base `nvidia/cuda`) |
-| Server command | `vllm serve` (via image entrypoint) | `transformers serve` |
-| Quantization | AWQ (`--quantization awq`) | AWQ via model weights + `autoawq` |
-| Typical GPU speed | Faster | Slower |
-| First startup | Model loads at start | Image build once, then model load |
+- `hf-cache` volume keeps old weights — do NOT prune it right after an update,
+  rollback needs the previous revision on disk.
+- vLLM restart is not instant: weights reload into GPU memory (minutes).
+  That window is what the Ollama fallback covers.
+- Agree on rollback criteria BEFORE shipping: e.g. error rate or p95 latency
+  above a threshold, or quality regression on a reference prompt set.
+- Rehearse the rollback once — an untested rollback fails when needed.
 
-## Compose files: main differences
+## Metrics and tuning (vLLM)
 
-Both deploy the same AWQ model on GPU with an OpenAI-compatible API on port `8000`. The difference is *how* inference is run.
+vLLM exposes Prometheus metrics on `:8000/metrics` (internal network only —
+`docker compose exec` or publish temporarily for debugging). Watch three things:
 
-### Side-by-side
+- KV-cache usage near 100% + growing queue → memory-bound: lower
+  `--max-model-len`, quantize harder, or raise `--gpu-memory-utilization`
+  (leave headroom for activation spikes).
+- Queue growing with empty cache → check `--max-num-seqs`.
+- Low prefix-cache hit rate → something variable sits at the START of your
+  prompts (timestamp, user id). Static content first, variable last.
 
-| Aspect | `vllm-docker-compose.yml` | `pt-docker-compose.yml` |
-|---|---|---|
-| **Runtime** | vLLM (dedicated inference engine) | PyTorch + Hugging Face `transformers serve` |
-| **Docker image** | Pre-built `vllm/vllm-openai` | Custom build from `Dockerfile.pt` |
-| **GPU access** | NVIDIA runtime + device reservation | NVIDIA device reservation, `ipc: host` |
-| **Dependencies** | Bundled in the image | Bundled at image build (`Dockerfile.pt`) |
-| **Startup time** | Faster after image pull | Fast after first `--build` (no pip on start) |
-| **Inference speed** | Optimized (PagedAttention, AWQ kernels) | Baseline PyTorch; generally slower |
-| **Config complexity** | Memory, context length, KV cache, API key | Device, dtype |
-| **Volumes** | `./model_cache` | `./huggingface-cache` |
+## Mac / no-NVIDIA fallback
 
-### What they share
+vLLM requires Linux + NVIDIA GPU. On macOS run Ollama (or llama-server / LM
+Studio) on the host instead and drop the `vllm` service:
 
-- Same default model: `Qwen/Qwen2.5-14B-Instruct-AWQ`
-- Same API shape: `POST /v1/chat/completions`
-- Same port: `8000`
-- Same benchmark client: `main.py` works with either stack
-- GPU required — NVIDIA Container Toolkit must be installed
+- In `litellm.yaml` point `chat-main` at `http://host.docker.internal:11434/v1`
+  with `model: openai/<your-ollama-model>` and any non-empty `api_key`.
+- Remove the `vllm` service and its `depends_on` from `compose.yaml`.
+- Everything else (gateway, keys, quotas, fallbacks) works identically —
+  throughput numbers will not match a GPU host, functionality will.
 
-### vLLM compose — key points
+## Troubleshooting
 
-- Image `vllm/vllm-openai:v0.28.0` with AWQ enabled (`--quantization awq`, `--dtype half`).
-- **GPU / serving knobs** via `.env`:
-  - `MODEL_NAME` — Hugging Face model ID
-  - `GPU_UTILIZE` — fraction of VRAM used (default `0.9`)
-  - `MODEL_NUM_CTX` — max model length / batched tokens (default `4096`)
-  - `KV_CACHE_DTYPE` — KV cache dtype (default `auto`)
-  - `API_KEY` — required by the vLLM OpenAI server
-- Best choice for **lowest latency and highest throughput**.
-
-### PyTorch compose — key points
-
-- Uses **vanilla PyTorch + CUDA** with Hugging Face's `transformers serve` CLI.
-- `Dockerfile.pt` starts from `nvidia/cuda` and installs pinned deps from `requirements-pt.txt` (`torch`/`torchvision`/`triton` from the CUDA 12.4 pip index, plus `transformers[serving]==4.55.4` and **`autoawq`** for AWQ).
-- `DEVICE=cuda:0` runs inference on the first GPU; `DTYPE=float16` (passed as `--torch_dtype`) is recommended for AWQ on CUDA.
-- Best choice to see **how inference works at the framework level** without an optimized serving layer.
-
-### When to use which
-
-| Goal | Recommended stack |
+| Symptom | Likely cause |
 |---|---|
-| Compare inference performance | Run both with `main.py` and compare timings |
-| Learn how LLM serving is optimized | vLLM |
-| Learn PyTorch / Transformers basics | PyTorch compose |
-| Fastest responses on GPU | vLLM |
-| Simplest mental model | PyTorch compose |
-
-## Configuration
-
-Copy `.env.example` to `.env` and edit values. Docker Compose loads `.env` automatically.
-
-Key variables:
-
-- `MODEL` / `MODEL_NAME` — Hugging Face model ID (`Qwen/Qwen2.5-14B-Instruct-AWQ`)
-- `HF_TOKEN` / `HUGGING_FACE_HUB_TOKEN` — Hugging Face access token (recommended)
-- `DTYPE` — `float16` for AWQ on PyTorch (`--torch_dtype`); vLLM uses `half` in the compose file
-- vLLM-specific: `API_KEY`, `GPU_UTILIZE`, `MODEL_NUM_CTX`, `KV_CACHE_DTYPE`
-- PyTorch-specific: `DEVICE`, `TRUST_REMOTE_CODE`
+| `litellm` never starts | `vllm` not healthy yet — model still loading (check `docker compose logs vllm`) |
+| 401 on every request | Missing/expired virtual key, or wrong `API_KEY` env in client |
+| 429 under load | Key's `rpm_limit`/`tpm_limit` hit — raise via `keys.sh` or issue a new key |
+| Fallback never triggers | `ollama` model not pulled yet, or `RESERVE_MODEL` ≠ name in `litellm.yaml` |
+| OOM in vLLM | Lower `--max-model-len` / `--gpu-memory-utilization`, or pick a smaller model |
 
 ## License
 
-Educational use. See upstream projects (vLLM, Transformers, PyTorch, Qwen) for their respective licenses.
+Educational use. See upstream projects (vLLM, LiteLLM, Ollama, Qwen) for their
+respective licenses.

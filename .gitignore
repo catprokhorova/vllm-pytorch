@@ -1,7 +1,10 @@
 .env
+.env.previous
+.env.*.local
 .vscode
 .idea
 .pytest_cache
+__pycache__/
 .ruff_cache
 .DS_Store
 huggingface_cache/
