@@ -61,7 +61,7 @@ services:
 
   litellm:
     image: ghcr.io/berriai/litellm:${LITELLM_TAG}
-    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--detailed_debug"]
     ports:
       - "4000:4000"
     volumes:
